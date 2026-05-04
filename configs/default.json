@@ -1,0 +1,16 @@
+{
+  "run_mode": "single_comparison",
+  "run_name": "experiment",
+  "datasets": ["la01.txt"],
+  "seeds": [42],
+  "init_modes": ["RANDOM", "RUBI", "GT", "SPT"],
+  "population_size": 100,
+  "generations": 200,
+  "elite_ratio": 0.05,
+  "crossover": {"type": "PMX", "pc": 0.9},
+  "mutation": {"type": "General", "pm": 0.9},
+  "selection": {"type": "Roulette"},
+  "target_makespan": null,
+  "save_gantt": false,
+  "output_root": "output"
+}
