@@ -7,7 +7,6 @@ output/
 # C extensions
 *.so
 .idea/
-docs/
 .claude/
 # Distribution / packaging
 .Python
