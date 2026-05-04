@@ -3,13 +3,20 @@ import json
 import os
 import time
 from datetime import datetime
+from itertools import product
 
 from src.data.dataset import Dataset
 from src.gas.engine import GAConfig, GAEngine
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable, **kwargs):
+        return iterable
+
 
 def _make_run_dir(output_root: str, run_name: str, timestamp: str = None) -> str:
-    timestamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = timestamp or datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     run_dir = os.path.join(output_root, run_name, timestamp)
     os.makedirs(run_dir, exist_ok=True)
     return run_dir
@@ -43,6 +50,34 @@ def _append_result_csv(run_dir: str, row: dict) -> None:
         writer.writerow({column: row.get(column) for column in columns})
 
 
+def _format_list(values) -> str:
+    return ", ".join(str(value) for value in values)
+
+
+def _basename_list(paths) -> str:
+    return _format_list(os.path.basename(path) for path in paths)
+
+
+def _print_console_note(run_dir: str, original_config_path: str, init_modes, dataset_files) -> None:
+    original_config = original_config_path or "N/A"
+    if isinstance(init_modes, str):
+        init_text = init_modes
+    else:
+        init_text = _format_list(init_modes)
+    if isinstance(dataset_files, str):
+        dataset_text = os.path.basename(dataset_files)
+    else:
+        dataset_text = _basename_list(dataset_files)
+
+    print("=========================================")
+    print(f"Saved: {run_dir}")
+    print(f"Original Config: {original_config}")
+    print("Resolved Config(Run config):")
+    print(f"Initialization Method: {init_text}")
+    print(f"Dataset: {dataset_text}")
+    print("=========================================")
+
+
 def run_single_opt(
     dataset_file: str,
     init_mode: str,
@@ -62,6 +97,8 @@ def run_single_opt(
     save_gantt: bool = False,
     run_dir: str = None,
     write_config: bool = True,
+    original_config_path: str = None,
+    console_note: bool = True,
 ) -> dict:
     started = time.time()
     dataset = Dataset(dataset_file)
@@ -100,6 +137,8 @@ def run_single_opt(
     }
     if write_config:
         _save_config(run_dir, saved_config)
+    if console_note:
+        _print_console_note(run_dir, original_config_path, init_mode, dataset_file)
 
     if save_gantt:
         from src.visualization.gantt import save_gantt as write_gantt
@@ -147,6 +186,8 @@ def run_single_comparison(
     save_gantt: bool = False,
     run_dir: str = None,
     write_config: bool = True,
+    original_config_path: str = None,
+    console_note: bool = True,
 ) -> list:
     run_dir = run_dir or _make_run_dir(output_root, run_name)
     if write_config:
@@ -163,29 +204,36 @@ def run_single_comparison(
                 "save_gantt": save_gantt,
             },
         )
-    return [
-        run_single_opt(
-            dataset_file,
-            init_mode,
-            crossover_cls,
-            crossover_params,
-            mutation_cls,
-            mutation_params,
-            selection_cls,
-            selection_params,
-            population_size,
-            generations,
-            elite_ratio,
-            seed,
-            run_name,
-            output_root,
-            target_makespan,
-            save_gantt,
-            run_dir,
-            False,
+    if console_note:
+        _print_console_note(run_dir, original_config_path, init_modes, dataset_file)
+
+    results = []
+    for init_mode in tqdm(init_modes, desc="Initialization modes"):
+        results.append(
+            run_single_opt(
+                dataset_file,
+                init_mode,
+                crossover_cls,
+                crossover_params,
+                mutation_cls,
+                mutation_params,
+                selection_cls,
+                selection_params,
+                population_size,
+                generations,
+                elite_ratio,
+                seed,
+                run_name,
+                output_root,
+                target_makespan,
+                save_gantt,
+                run_dir,
+                False,
+                original_config_path,
+                False,
+            )
         )
-        for init_mode in init_modes
-    ]
+    return results
 
 
 def run_multiple_comparison(
@@ -205,6 +253,7 @@ def run_multiple_comparison(
     output_root: str = "output",
     target_makespan: int = None,
     save_gantt: bool = False,
+    original_config_path: str = None,
 ) -> list:
     run_dir = _make_run_dir(output_root, run_name)
     _save_config(
@@ -220,31 +269,35 @@ def run_multiple_comparison(
             "save_gantt": save_gantt,
         },
     )
+    _print_console_note(run_dir, original_config_path, init_modes, dataset_files)
+
     results = []
-    for dataset_file in dataset_files:
-        for seed in seeds:
-            results.extend(
-                run_single_comparison(
-                    dataset_file,
-                    init_modes,
-                    crossover_cls,
-                    crossover_params,
-                    mutation_cls,
-                    mutation_params,
-                    selection_cls,
-                    selection_params,
-                    population_size,
-                    generations,
-                    elite_ratio,
-                    seed,
-                    run_name,
-                    output_root,
-                    target_makespan,
-                    save_gantt,
-                    run_dir,
-                    False,
-                )
+    combinations = list(product(dataset_files, seeds))
+    for dataset_file, seed in tqdm(combinations, desc="Datasets x seeds"):
+        results.extend(
+            run_single_comparison(
+                dataset_file,
+                init_modes,
+                crossover_cls,
+                crossover_params,
+                mutation_cls,
+                mutation_params,
+                selection_cls,
+                selection_params,
+                population_size,
+                generations,
+                elite_ratio,
+                seed,
+                run_name,
+                output_root,
+                target_makespan,
+                save_gantt,
+                run_dir,
+                False,
+                original_config_path,
+                False,
             )
+        )
     return results
 
 
@@ -260,6 +313,7 @@ def run_grid_search(
     seeds: list,
     run_name: str,
     output_root: str = "output",
+    original_config_path: str = None,
 ) -> list:
     run_dir = _make_run_dir(output_root, run_name)
     _save_config(
@@ -273,34 +327,51 @@ def run_grid_search(
             "seeds": seeds,
         },
     )
+    _print_console_note(run_dir, original_config_path, init_modes, dataset_files)
+
     results = []
-    for dataset_file in dataset_files:
-        for init_mode in init_modes:
-            for crossover_config in crossover_configs:
-                for mutation_config in mutation_configs:
-                    for selection_config in selection_configs:
-                        for elite_ratio in elite_ratios:
-                            for seed in seeds:
-                                results.append(
-                                    run_single_opt(
-                                        dataset_file,
-                                        init_mode,
-                                        crossover_config["cls"],
-                                        {k: v for k, v in crossover_config.items() if k != "cls"},
-                                        mutation_config["cls"],
-                                        {k: v for k, v in mutation_config.items() if k != "cls"},
-                                        selection_config["cls"],
-                                        {k: v for k, v in selection_config.items() if k != "cls"},
-                                        population_size,
-                                        generations,
-                                        elite_ratio,
-                                        seed,
-                                        run_name,
-                                        output_root,
-                                        None,
-                                        False,
-                                        run_dir,
-                                        False,
-                                    )
-                                )
+    combinations = list(
+        product(
+            dataset_files,
+            init_modes,
+            crossover_configs,
+            mutation_configs,
+            selection_configs,
+            elite_ratios,
+            seeds,
+        )
+    )
+    for (
+        dataset_file,
+        init_mode,
+        crossover_config,
+        mutation_config,
+        selection_config,
+        elite_ratio,
+        seed,
+    ) in tqdm(combinations, desc="Grid search"):
+        results.append(
+            run_single_opt(
+                dataset_file,
+                init_mode,
+                crossover_config["cls"],
+                {k: v for k, v in crossover_config.items() if k != "cls"},
+                mutation_config["cls"],
+                {k: v for k, v in mutation_config.items() if k != "cls"},
+                selection_config["cls"],
+                {k: v for k, v in selection_config.items() if k != "cls"},
+                population_size,
+                generations,
+                elite_ratio,
+                seed,
+                run_name,
+                output_root,
+                None,
+                False,
+                run_dir,
+                False,
+                original_config_path,
+                False,
+            )
+        )
     return results

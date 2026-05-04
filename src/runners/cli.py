@@ -102,6 +102,7 @@ def main() -> None:
         "output_root": cfg.get("output_root", "output"),
         "target_makespan": cfg.get("target_makespan"),
         "save_gantt": cfg.get("save_gantt", False),
+        "original_config_path": args.config,
     }
 
     run_mode = cfg["run_mode"]
@@ -139,6 +140,7 @@ def main() -> None:
             seeds=cfg["seeds"],
             run_name=cfg["run_name"],
             output_root=cfg.get("output_root", "output"),
+            original_config_path=args.config,
         )
     else:
         raise ValueError(f"Unknown run_mode: {run_mode}")
